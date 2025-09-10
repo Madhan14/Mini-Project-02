@@ -1,6 +1,5 @@
 terraform {
   required_version = ">= 1.5.0"
-
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -10,81 +9,60 @@ terraform {
 }
 
 provider "aws" {
-  region = "ap-south-1" # change if you want another AWS region
+  region = "ap-south-1"
 }
 
 # -------------------------
-# 1. VPC
+# VPC + Networking
 # -------------------------
-resource "aws_vpc" "main" {
+resource "aws_vpc" "trend_vpc" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true
-
-  tags = {
-    Name = "trend-vpc"
-  }
+  tags = { Name = "trend-vpc" }
 }
 
-# Public Subnet in ap-south-1a
 resource "aws_subnet" "public_a" {
-  vpc_id                  = aws_vpc.main.id
+  vpc_id                  = aws_vpc.trend_vpc.id
   cidr_block              = "10.0.10.0/24"
   availability_zone       = "ap-south-1a"
   map_public_ip_on_launch = true
-
-  tags = {
-    Name = "trend-public-subnet-a"
-  }
+  tags = { Name = "trend-public-a" }
 }
 
-# Public Subnet in ap-south-1b
 resource "aws_subnet" "public_b" {
-  vpc_id                  = aws_vpc.main.id
+  vpc_id                  = aws_vpc.trend_vpc.id
   cidr_block              = "10.0.11.0/24"
   availability_zone       = "ap-south-1b"
   map_public_ip_on_launch = true
-
-  tags = {
-    Name = "trend-public-subnet-b"
-  }
+  tags = { Name = "trend-public-b" }
 }
 
 resource "aws_internet_gateway" "gw" {
-  vpc_id = aws_vpc.main.id
-  tags = {
-    Name = "trend-igw"
-  }
+  vpc_id = aws_vpc.trend_vpc.id
+  tags   = { Name = "trend-igw" }
 }
 
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
+resource "aws_route_table" "public_rt" {
+  vpc_id = aws_vpc.trend_vpc.id
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.gw.id
   }
-
-  tags = {
-    Name = "trend-public-rt"
-  }
+  tags = { Name = "trend-public-rt" }
 }
 
-# Route table associations
-resource "aws_route_table_association" "public_assoc_a" {
+resource "aws_route_table_association" "public_a_assoc" {
   subnet_id      = aws_subnet.public_a.id
-  route_table_id = aws_route_table.public.id
+  route_table_id = aws_route_table.public_rt.id
 }
-
-resource "aws_route_table_association" "public_assoc_b" {
+resource "aws_route_table_association" "public_b_assoc" {
   subnet_id      = aws_subnet.public_b.id
-  route_table_id = aws_route_table.public.id
+  route_table_id = aws_route_table.public_rt.id
 }
 
-# -------------------------
-# 2. Security Group
-# -------------------------
 resource "aws_security_group" "app_sg" {
-  vpc_id = aws_vpc.main.id
+  vpc_id = aws_vpc.trend_vpc.id
   name   = "trend-sg"
 
   ingress {
@@ -110,48 +88,44 @@ resource "aws_security_group" "app_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name = "trend-app-sg"
-  }
+  tags = { Name = "trend-app-sg" }
 }
 
 # -------------------------
-# 3. IAM Role + Profile
+# IAM Role for EC2
 # -------------------------
-resource "aws_iam_role" "ec2_role" {
+resource "aws_iam_role" "trend_ec2_role" {
   name = "trend-ec2-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
     Statement = [{
       Effect = "Allow",
-      Principal = {
-        Service = "ec2.amazonaws.com"
-      },
-      Action = "sts:AssumeRole"
+      Principal = { Service = "ec2.amazonaws.com" },
+      Action    = "sts:AssumeRole"
     }]
   })
 }
 
-resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "trend-ec2-profile"
-  role = aws_iam_role.ec2_role.name
+resource "aws_iam_instance_profile" "trend_ec2_profile" {
+  name = "trend-ec2-profile-v2"
+  role = aws_iam_role.trend_ec2_role.name
 }
 
+
 # -------------------------
-# 4. EC2 Instance (Ubuntu)
+# EC2 Instance
 # -------------------------
-resource "aws_instance" "app" {
-  ami           = "ami-0f58b397bc5c1f2e8" # Ubuntu 22.04 in ap-south-1
+resource "aws_instance" "trend_app" {
+  ami           = "ami-02d26659fd82cf299" # Ubuntu 22.04 in ap-south-1
   instance_type = "t2.micro"
 
-  subnet_id              = aws_subnet.public_a.id # Launch in subnet A
+  subnet_id              = aws_subnet.public_a.id
   vpc_security_group_ids = [aws_security_group.app_sg.id]
   associate_public_ip_address = true
 
-  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
-
-  key_name = "ec2-key-pair" # replace with actual key pair in AWS account
+  iam_instance_profile = aws_iam_instance_profile.trend_ec2_profile.name
+  key_name             = "ec2-key-pair" # Replace with your actual key pair name
 
   user_data = <<-EOF
               #!/bin/bash
@@ -163,7 +137,5 @@ resource "aws_instance" "app" {
               docker run -d -p 3000:3000 madhan14/project-2:v1
               EOF
 
-  tags = {
-    Name = "trend-ec2"
-  }
+  tags = { Name = "trend-ec2" }
 }
